@@ -23,6 +23,15 @@ function App() {
   const [authPassword, setAuthPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
 
+  // Preview States
+  const [previewFile, setPreviewFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewTextContent, setPreviewTextContent] = useState("");
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+
+  // Dropdown Menu State
+  const [activeDropdown, setActiveDropdown] = useState(null);
+
   // Load files when token is available or changes
   useEffect(() => {
     if (token) {
@@ -31,6 +40,13 @@ function App() {
       setFiles([]);
     }
   }, [token]);
+
+  // Click outside to close dropdown
+  useEffect(() => {
+    const closeAllDropdowns = () => setActiveDropdown(null);
+    window.addEventListener("click", closeAllDropdowns);
+    return () => window.removeEventListener("click", closeAllDropdowns);
+  }, []);
 
   const addToast = (message, type = "success") => {
     const id = Date.now();
@@ -58,6 +74,62 @@ function App() {
         addToast("Failed to fetch files from server", "error");
       }
     }
+  };
+
+  const getFileType = (filename) => {
+    const ext = filename.split(".").pop().toLowerCase();
+    if (["jpg", "jpeg", "png", "gif", "svg", "webp"].includes(ext)) return "image";
+    if (ext === "pdf") return "pdf";
+    if (["mp3", "wav", "ogg"].includes(ext)) return "audio";
+    if (["mp4", "webm"].includes(ext)) return "video";
+    if (["txt", "md", "js", "html", "css", "json", "ts", "jsx", "tsx"].includes(ext)) return "text";
+    return "unknown";
+  };
+
+  const handlePreview = async (file) => {
+    const type = getFileType(file.originalName);
+    setPreviewFile(file);
+    setIsPreviewLoading(true);
+    setPreviewUrl("");
+    setPreviewTextContent("");
+    
+    try {
+      const response = await axios.get(`${API_BASE}/files/${file.id}`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        responseType: type === "text" ? "text" : "blob"
+      });
+
+      if (type === "text") {
+        setPreviewTextContent(response.data);
+      } else {
+        const mimeMap = {
+          image: "image/*",
+          pdf: "application/pdf",
+          audio: "audio/*",
+          video: "video/*"
+        };
+        const blobType = response.data.type || mimeMap[type] || "application/octet-stream";
+        const blobUrl = window.URL.createObjectURL(new Blob([response.data], { type: blobType }));
+        setPreviewUrl(blobUrl);
+      }
+    } catch (error) {
+      console.error("Preview error:", error);
+      addToast("Failed to fetch file for preview", "error");
+      setPreviewFile(null);
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  };
+
+  const handleClosePreview = () => {
+    if (previewUrl) {
+      window.URL.revokeObjectURL(previewUrl);
+    }
+    setPreviewFile(null);
+    setPreviewUrl("");
+    setPreviewTextContent("");
   };
 
   const handleFileChange = (e) => {
@@ -375,29 +447,31 @@ function App() {
   return (
     <div className="min-h-screen flex flex-col font-sans select-none text-zinc-100 text-white bg-black">
       {/* Top Navbar */}
-      <nav className="sticky top-0 left-0 right-0 h-16 bg-zinc-950/85 backdrop-blur-md border-b border-white/5 flex justify-between items-center px-8 z-50 shadow-md">
-        <div className="flex items-center gap-2.5">
-          <h1 className="text-xl font-extrabold tracking-tight text-white">
-            O3 - Cloud Storage
-          </h1>
-        </div>
-        
-        <div className="flex items-center gap-6">
-          <span className="text-xs font-semibold text-zinc-400 bg-white/5 border border-white/5 py-1.5 px-3.5 rounded-full">
-            👤 {user?.email}
-          </span>
-          <button 
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm border border-white/10 hover:border-white/20 bg-transparent hover:bg-white/5 text-zinc-300 hover:text-white shadow-sm transition-all duration-200 cursor-pointer active:scale-95"
-            onClick={() => setIsUploadModalOpen(true)}
-          >
-            Upload
-          </button>
-          <button 
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm bg-zinc-900 border border-white/5 hover:border-rose-500/30 hover:bg-rose-500/8 text-zinc-400 hover:text-rose-400 shadow-sm transition-all duration-200 cursor-pointer active:scale-95"
-            onClick={handleLogout}
-          >
-            Logout
-          </button>
+      <nav className="sticky top-0 left-0 right-0 h-16 bg-zinc-950/85 backdrop-blur-md border-b border-white/5 z-50 shadow-md">
+        <div className="max-w-7xl mx-auto w-full h-full flex justify-between items-center px-8">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl font-extrabold tracking-tight text-white">
+              O3 - Cloud Storage
+            </h1>
+          </div>
+          
+          <div className="flex items-center gap-6">
+            <span className="text-xs font-semibold text-zinc-400 bg-white/5 border border-white/5 py-1.5 px-3.5 rounded-full">
+              👤 {user?.email}
+            </span>
+            <button 
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm border border-white/10 hover:border-white/20 bg-transparent hover:bg-white/5 text-zinc-300 hover:text-white shadow-sm transition-all duration-200 cursor-pointer active:scale-95"
+              onClick={() => setIsUploadModalOpen(true)}
+            >
+              Upload
+            </button>
+            <button 
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm bg-zinc-900 border border-white/5 hover:border-rose-500/30 hover:bg-rose-500/8 text-zinc-400 hover:text-rose-400 shadow-sm transition-all duration-200 cursor-pointer active:scale-95"
+              onClick={handleLogout}
+            >
+              Logout
+            </button>
+          </div>
         </div>
       </nav>
 
@@ -424,9 +498,72 @@ function App() {
             </div>
           ) : (
             files.map((file) => (
-              <div className="aspect-square bg-zinc-900/65 border border-white/5 rounded-2xl p-5 flex flex-col justify-between items-center text-center shadow-sm relative group" key={file.id}>
+              <div 
+                className="aspect-square bg-zinc-900/65 border border-white/5 rounded-2xl p-5 flex flex-col justify-center items-center text-center shadow-sm relative group cursor-pointer hover:bg-zinc-900/85 hover:border-white/10 active:scale-[0.98] transition-all duration-200" 
+                key={file.id}
+                onClick={() => handlePreview(file)}
+              >
+                {/* Three-dot menu button */}
+                <div className="absolute top-4 right-4 z-20">
+                  <button
+                    className="w-8 h-8 rounded-lg flex items-center justify-center bg-transparent border-none text-zinc-400 hover:text-white hover:bg-white/5 cursor-pointer transition-all duration-200"
+                    title="More Actions"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveDropdown((prev) => (prev === file.id ? null : file.id));
+                    }}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="1"/>
+                      <circle cx="12" cy="5" r="1"/>
+                      <circle cx="12" cy="19" r="1"/>
+                    </svg>
+                  </button>
+
+                  {/* Dropdown Menu */}
+                  {activeDropdown === file.id && (
+                    <div 
+                      className="absolute right-0 mt-1 w-32 bg-zinc-950/95 backdrop-blur-md border border-white/5 rounded-xl shadow-xl overflow-hidden py-1"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        className="w-full text-left px-4 py-2 text-xs font-semibold text-zinc-300 hover:text-white hover:bg-white/5 flex items-center gap-2 cursor-pointer transition-colors duration-150"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveDropdown(null);
+                          handleDownload(file);
+                        }}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                          <polyline points="7 10 12 15 17 10"/>
+                          <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        Download
+                      </button>
+                      <button
+                        className="w-full text-left px-4 py-2 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-500/5 flex items-center gap-2 cursor-pointer transition-colors duration-150"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveDropdown(null);
+                          handleDelete(file.id, file.originalName);
+                        }}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6"/>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                          <line x1="10" y1="11" x2="10" y2="17"/>
+                          <line x1="14" y1="11" x2="14" y2="17"/>
+                        </svg>
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Card Content */}
                 <div className="flex flex-col items-center gap-3 w-full mt-2">
-                  <div className="w-12 h-12 rounded-xl bg-indigo-500/5 border border-indigo-500/10 flex items-center justify-center text-indigo-400 transition-all duration-200">
+                  <div className="w-12 h-12 rounded-xl bg-indigo-500/5 border border-indigo-500/10 flex items-center justify-center text-indigo-400 transition-all duration-200 group-hover:scale-105 group-hover:bg-indigo-500/10">
                     {getFileIcon(file.originalName)}
                   </div>
                   <span className="text-sm font-semibold text-zinc-200 w-full truncate px-1" title={file.originalName}>
@@ -435,33 +572,6 @@ function App() {
                   <span className="text-[11px] text-zinc-500 w-full truncate">
                     {formatDate(file.createdAt)}
                   </span>
-                </div>
-
-                <div className="flex justify-center gap-3 w-full border-t border-white/5 pt-3 mt-2">
-                  <button 
-                    className="w-9 h-9 rounded-lg border border-white/5 bg-transparent text-zinc-400 hover:text-emerald-400 hover:border-emerald-500/30 hover:bg-emerald-500/8 flex items-center justify-center cursor-pointer transition-all duration-200"
-                    title="Download File"
-                    onClick={() => handleDownload(file)}
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                      <polyline points="7 10 12 15 17 10"/>
-                      <line x1="12" y1="15" x2="12" y2="3"/>
-                    </svg>
-                  </button>
-
-                  <button 
-                    className="w-9 h-9 rounded-lg border border-white/5 bg-transparent text-zinc-400 hover:text-rose-400 hover:border-rose-500/30 hover:bg-rose-500/8 flex items-center justify-center cursor-pointer transition-all duration-200"
-                    title="Delete File"
-                    onClick={() => handleDelete(file.id, file.originalName)}
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="3 6 5 6 21 6"/>
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                      <line x1="10" y1="11" x2="10" y2="17"/>
-                      <line x1="14" y1="11" x2="14" y2="17"/>
-                    </svg>
-                  </button>
                 </div>
               </div>
             ))
@@ -582,6 +692,122 @@ function App() {
                 </button>
               )}
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* File Preview Modal */}
+      {previewFile && (
+        <div 
+          className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4"
+          onClick={handleClosePreview}
+        >
+          <div 
+            className="bg-zinc-950 border border-white/5 rounded-3xl w-full max-w-4xl p-6 shadow-2xl relative flex flex-col max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex justify-between items-center border-b border-white/5 pb-4 mb-4">
+              <div className="flex items-center gap-3 truncate pr-4">
+                <span className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                  {getFileIcon(previewFile.originalName)}
+                </span>
+                <h3 className="text-base font-bold text-zinc-100 truncate" title={previewFile.originalName}>
+                  {previewFile.originalName}
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleDownload(previewFile)}
+                  className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-white/5 border border-white/5 hover:bg-white/10 text-zinc-200 hover:text-white transition-all cursor-pointer"
+                >
+                  Download
+                </button>
+                <button 
+                  className="bg-transparent border-none text-zinc-400 hover:text-zinc-200 p-1.5 rounded-lg hover:bg-white/5 cursor-pointer transition-all duration-200"
+                  onClick={handleClosePreview}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Content Area */}
+            <div className="flex-1 overflow-auto flex items-center justify-center min-h-[40vh] max-h-[70vh]">
+              {isPreviewLoading ? (
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                  <span className="text-sm font-semibold text-zinc-400">Loading preview...</span>
+                </div>
+              ) : (
+                (() => {
+                  const type = getFileType(previewFile.originalName);
+                  if (type === "image") {
+                    return (
+                      <img 
+                        src={previewUrl} 
+                        alt={previewFile.originalName} 
+                        className="max-h-[65vh] max-w-full rounded-xl object-contain shadow-md"
+                      />
+                    );
+                  }
+                  if (type === "pdf") {
+                    return (
+                      <iframe 
+                        src={previewUrl} 
+                        title={previewFile.originalName} 
+                        className="w-full h-[65vh] rounded-xl border border-white/5"
+                      />
+                    );
+                  }
+                  if (type === "audio") {
+                    return (
+                      <div className="flex flex-col items-center gap-4 w-full max-w-md p-6 bg-white/[0.01] border border-white/5 rounded-2xl">
+                        <div className="w-16 h-16 rounded-full bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 text-2xl animate-pulse">
+                          🎵
+                        </div>
+                        <audio src={previewUrl} controls className="w-full" autoPlay />
+                      </div>
+                    );
+                  }
+                  if (type === "video") {
+                    return (
+                      <video 
+                        src={previewUrl} 
+                        controls 
+                        className="max-h-[65vh] max-w-full rounded-xl"
+                        autoPlay 
+                      />
+                    );
+                  }
+                  if (type === "text") {
+                    return (
+                      <pre className="w-full text-left bg-zinc-950 p-6 rounded-2xl text-xs font-mono text-zinc-300 overflow-auto max-h-[65vh] border border-white/5 whitespace-pre-wrap leading-relaxed">
+                        {previewTextContent}
+                      </pre>
+                    );
+                  }
+                  return (
+                    <div className="flex flex-col items-center gap-4 text-center max-w-sm">
+                      <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                          <line x1="12" y1="9" x2="12" y2="13"/>
+                          <line x1="12" y1="17" x2="12.01" y2="17"/>
+                        </svg>
+                      </div>
+                      <div>
+                        <h4 className="text-zinc-200 font-bold mb-1">Preview Unavailable</h4>
+                        <p className="text-xs text-zinc-500">In-app previewing is not supported for this file type.</p>
+                      </div>
+                    </div>
+                  );
+                })()
+              )}
+            </div>
           </div>
         </div>
       )}
