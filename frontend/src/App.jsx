@@ -13,10 +13,24 @@ function App() {
   const [toasts, setToasts] = useState([]);
   const fileInputRef = useRef(null);
 
-  // Load files on component mount
+  // Authentication State
+  const [token, setToken] = useState(localStorage.getItem("token") || "");
+  const [user, setUser] = useState(
+    localStorage.getItem("user") ? JSON.parse(localStorage.getItem("user")) : null
+  );
+  const [isRegister, setIsRegister] = useState(false);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+
+  // Load files when token is available or changes
   useEffect(() => {
-    fetchFiles();
-  }, []);
+    if (token) {
+      fetchFiles();
+    } else {
+      setFiles([]);
+    }
+  }, [token]);
 
   const addToast = (message, type = "success") => {
     const id = Date.now();
@@ -28,11 +42,21 @@ function App() {
 
   const fetchFiles = async () => {
     try {
-      const response = await axios.get(`${API_BASE}/files`);
+      const response = await axios.get(`${API_BASE}/files`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
       setFiles(response.data);
     } catch (error) {
       console.error("Error fetching files:", error);
-      addToast("Failed to fetch files from server", "error");
+      if (error.response?.status === 401) {
+        // Token might be expired or invalid
+        handleLogout();
+        addToast("Session expired. Please log in again.", "error");
+      } else {
+        addToast("Failed to fetch files from server", "error");
+      }
     }
   };
 
@@ -80,6 +104,7 @@ function App() {
       await axios.post(`${API_BASE}/upload`, formData, {
         headers: {
           "Content-Type": "multipart/form-data",
+          Authorization: `Bearer ${token}`
         },
         onUploadProgress: (progressEvent) => {
           const percentCompleted = Math.round(
@@ -92,7 +117,7 @@ function App() {
       addToast("File uploaded successfully!");
       setSelectedFile(null);
       setUploadProgress(0);
-      setIsUploadModalOpen(false); // Close the popup after successful upload
+      setIsUploadModalOpen(false); // Close popup
       fetchFiles();
     } catch (error) {
       console.error("Upload error:", error);
@@ -103,23 +128,93 @@ function App() {
     }
   };
 
-  const handleDownload = (file) => {
-    const downloadUrl = file.url || `${API_BASE}/files/${file.id}`;
-    window.open(downloadUrl, "_blank");
-    addToast(`Downloading ${file.originalName}...`);
+  const handleDownload = async (file) => {
+    try {
+      addToast(`Downloading ${file.originalName}...`);
+      
+      // Fetch file as a Blob with authorization header
+      const response = await axios.get(`${API_BASE}/files/${file.id}`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        responseType: "blob"
+      });
+
+      // Create a local blob URL and trigger download link
+      const blobUrl = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.setAttribute("download", file.originalName);
+      document.body.appendChild(link);
+      link.click();
+      
+      // Cleanup
+      link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error("Download error:", error);
+      addToast("Failed to download file. You may not have access.", "error");
+    }
   };
 
   const handleDelete = async (id, name) => {
     if (!window.confirm(`Are you sure you want to delete ${name}?`)) return;
 
     try {
-      await axios.delete(`${API_BASE}/files/${id}`);
+      await axios.delete(`${API_BASE}/files/${id}`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
       addToast("File deleted successfully!");
       setFiles((prev) => prev.filter((f) => f.id !== id));
     } catch (error) {
       console.error("Delete error:", error);
       addToast("Failed to delete file", "error");
     }
+  };
+
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    if (!authEmail || !authPassword) {
+      addToast("Please fill in all fields", "error");
+      return;
+    }
+    setAuthLoading(true);
+    try {
+      const endpoint = isRegister ? "/auth/register" : "/auth/login";
+      const response = await axios.post(`${API_BASE}${endpoint}`, {
+        email: authEmail,
+        password: authPassword
+      });
+      
+      const { token: receivedToken, user: receivedUser } = response.data;
+      
+      localStorage.setItem("token", receivedToken);
+      localStorage.setItem("user", JSON.stringify(receivedUser));
+      
+      setToken(receivedToken);
+      setUser(receivedUser);
+      addToast(isRegister ? "Registered and logged in successfully!" : "Logged in successfully!");
+      
+      setAuthEmail("");
+      setAuthPassword("");
+    } catch (error) {
+      console.error("Auth error:", error);
+      const errorMsg = error.response?.data?.error || "Authentication failed";
+      addToast(errorMsg, "error");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    setToken("");
+    setUser(null);
+    setFiles([]);
+    addToast("Logged out successfully.");
   };
 
   const formatDate = (dateString) => {
@@ -151,7 +246,7 @@ function App() {
         </svg>
       );
     }
-
+    
     // Code/Text Icon
     if (["txt", "md", "js", "html", "css", "json", "ts"].includes(ext)) {
       return (
@@ -174,28 +269,145 @@ function App() {
     );
   };
 
+  // If user is not logged in, render authentication page
+  if (!token) {
+    return (
+      <div className="min-h-screen flex flex-col justify-center items-center font-sans select-none text-white bg-black p-4 relative overflow-hidden">
+        {/* Backdrop Glow Effects */}
+        <div className="absolute top-1/4 left-1/4 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full bg-indigo-500/10 blur-[120px] pointer-events-none"></div>
+        <div className="absolute bottom-1/4 right-1/4 translate-x-1/2 translate-y-1/2 w-96 h-96 rounded-full bg-purple-500/10 blur-[120px] pointer-events-none"></div>
+
+        <div className="w-full max-w-md bg-zinc-950/60 backdrop-blur-xl border border-white/5 p-8 rounded-3xl shadow-2xl relative z-10">
+          <div className="text-center mb-8">
+            <h1 className="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-white via-zinc-200 to-zinc-400 bg-clip-text text-transparent mb-2">
+              O3 - Secure Drive
+            </h1>
+            <p className="text-zinc-500 text-xs font-semibold uppercase tracking-wider">
+              {isRegister ? "Create a new account" : "Sign in to access your storage"}
+            </p>
+          </div>
+
+          <form onSubmit={handleAuthSubmit} className="flex flex-col gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2" htmlFor="email">
+                Email Address
+              </label>
+              <input
+                id="email"
+                type="email"
+                placeholder="you@example.com"
+                className="w-full px-4 py-3 rounded-xl bg-zinc-900 border border-white/5 focus:border-indigo-500/40 text-sm outline-none transition-all duration-200"
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2" htmlFor="password">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                placeholder="••••••••"
+                className="w-full px-4 py-3 rounded-xl bg-zinc-900 border border-white/5 focus:border-indigo-500/40 text-sm outline-none transition-all duration-200"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={authLoading}
+              className="w-full mt-2 py-3 rounded-xl font-semibold text-sm bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white shadow-lg shadow-indigo-500/10 hover:shadow-indigo-500/20 active:scale-95 transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {authLoading ? (
+                <span>Loading...</span>
+              ) : (
+                <span>{isRegister ? "Create Account" : "Sign In"}</span>
+              )}
+            </button>
+          </form>
+
+          <div className="mt-8 text-center border-t border-white/5 pt-6">
+            <button
+              onClick={() => {
+                setIsRegister(!isRegister);
+                setAuthEmail("");
+                setAuthPassword("");
+              }}
+              className="text-xs font-semibold text-zinc-400 hover:text-indigo-400 transition-colors duration-200 cursor-pointer bg-transparent border-none"
+            >
+              {isRegister ? "Already have an account? Sign In" : "Don't have an account? Register"}
+            </button>
+          </div>
+        </div>
+
+        {/* Toast Messages */}
+        <div className="fixed bottom-8 right-8 flex flex-col gap-3 z-50">
+          {toasts.map((toast) => (
+            <div className={`flex items-center gap-3 py-3 px-5 rounded-xl text-white text-sm font-semibold shadow-xl ${
+              toast.type === "success" 
+                ? "bg-gradient-to-r from-emerald-500 to-teal-600" 
+                : "bg-gradient-to-r from-rose-500 to-red-600"
+            }`} key={toast.id}>
+              {toast.type === "success" ? (
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="8" x2="12" y2="12"/>
+                  <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+              )}
+              <span>{toast.message}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col font-sans select-none text-zinc-100 text-white bg-black">
       {/* Top Navbar */}
       <nav className="sticky top-0 left-0 right-0 h-16 bg-zinc-950/85 backdrop-blur-md border-b border-white/5 flex justify-between items-center px-8 z-50 shadow-md">
         <div className="flex items-center gap-2.5">
-          <h1 className="text-xl font-extrabold tracking-tight text-white ">
+          <h1 className="text-xl font-extrabold tracking-tight text-white">
             O3 - Cloud Storage
           </h1>
         </div>
         
-        <button className="inline-flex items-center gap-2 px-5 py-2 rounded-lg font-semibold text-sm bg-white hover:bg-zinc-100 text-black shadow-sm transition-all duration-200 cursor-pointer active:scale-95" onClick={() => setIsUploadModalOpen(true)}>
-          Upload
-        </button>
+        <div className="flex items-center gap-6">
+          <span className="text-xs font-semibold text-zinc-400 bg-white/5 border border-white/5 py-1.5 px-3.5 rounded-full">
+            👤 {user?.email}
+          </span>
+          <button 
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm border border-white/10 hover:border-white/20 bg-transparent hover:bg-white/5 text-zinc-300 hover:text-white shadow-sm transition-all duration-200 cursor-pointer active:scale-95"
+            onClick={() => setIsUploadModalOpen(true)}
+          >
+            Upload
+          </button>
+          <button 
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm bg-zinc-900 border border-white/5 hover:border-rose-500/30 hover:bg-rose-500/8 text-zinc-400 hover:text-rose-400 shadow-sm transition-all duration-200 cursor-pointer active:scale-95"
+            onClick={handleLogout}
+          >
+            Logout
+          </button>
+        </div>
       </nav>
 
       {/* Main Grid View */}
-      <main className="flex-1 p-8 max-w-7xl mx-auto w-full ">
+      <main className="flex-1 p-8 max-w-7xl mx-auto w-full">
         <div className="flex items-center gap-2 mb-6 text-sm font-semibold text-zinc-400 uppercase tracking-wider">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-indigo-400">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
           </svg>
-          All Files
+          My Files
         </div>
 
         <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-6 w-full">

@@ -21,13 +21,15 @@ const upload = multer({
     storage
 })
 
+const authenticate = require("../middleware/auth")
 const {getFiles,uploadFiles , downloadFiles , deleteFiles} = require("../controllers/file.controller")
-router.get("/files",getFiles)
+router.get("/files", authenticate, getFiles)
 router.post("/upload",
+    authenticate,
     upload.single("file"),
     uploadFiles)
-router.get("/files/:id",downloadFiles)
-router.delete("/files/:id",deleteFiles)
+router.get("/files/:id", authenticate, downloadFiles)
+router.delete("/files/:id", authenticate, deleteFiles)
 
 
 module.exports = router

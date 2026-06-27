@@ -11,10 +11,19 @@ datasource db {
   provider = "postgresql"
 }
 
-model File{
-  id String @id @default(uuid())
+model User {
+  id       String @id @default(uuid())
+  email    String @unique
+  password String
+  files    File[]
+}
+
+model File {
+  id           String   @id @default(uuid())
   originalName String
-  storedName String
-  url String?
-  createdAt DateTime @default(now())
+  storedName   String
+  url          String?
+  createdAt    DateTime @default(now())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
 }
