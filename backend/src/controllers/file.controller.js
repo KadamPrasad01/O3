@@ -87,14 +87,18 @@ const downloadFiles = async (req, res) => {
             return res.status(404).json({ error: "File record not found or access denied" })
         }
 
-        // 2. Generate a signed temporary download URL from Supabase
+        // 2. Download the file from Supabase Storage
         const { data, error } = await supabase.storage
             .from("o3-files")
-            .createSignedUrl(`${userId}/${fileRecord.storedName}`, 60) // valid for 60 seconds
-        if (error || !data) throw error
+            .download(`${userId}/${fileRecord.storedName}`);
+        if (error || !data) throw error;
 
-        // Redirect the user to download the file directly from Supabase Cloud
-        res.redirect(data.signedUrl)
+        // 3. Send the file buffer directly to the client with appropriate Content-Type header
+        const arrayBuffer = await data.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        
+        res.setHeader("Content-Type", data.type || "application/octet-stream");
+        res.send(buffer);
     } catch (error) {
         console.error("Download error:", error)
         res.status(500).json({ error: "Failed to download file" })
