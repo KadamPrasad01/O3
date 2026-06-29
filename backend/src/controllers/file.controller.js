@@ -2,6 +2,7 @@ const fs = require("fs")
 const path = require("path")
 const { v4: uuid4 } = require("uuid")
 const prisma = require("../lib/prisma")
+const supabase = require("../lib/supabase")
 
 const getFiles = async (req, res) => {
     try {
@@ -27,17 +28,33 @@ const uploadFiles = async (req, res) => {
         }
 
         const fileId = uuid4()
-        const fileUrl = `${req.protocol}://${req.get("host")}/files/${fileId}`
+        const extension = path.extname(req.file.originalname)
+        const storedName = `${fileId}${extension}`
         const userId = req.user.id;
 
-        // Save metadata to PostgreSQL using Prisma inside transaction to enforce RLS
+        // 1. Upload file buffer to Supabase Storage Bucket
+        const { data, error } = await supabase.storage
+            .from("o3-files")
+            .upload(`${userId}/${storedName}`, req.file.buffer, {
+                contentType: req.file.mimetype,
+                upsert: false
+            })
+        if (error) throw error
+
+        // 2. Retrieve public URL
+        const { data: urlData } = supabase.storage
+            .from("o3-files")
+            .getPublicUrl(`${userId}/${storedName}`)
+        const fileUrl = urlData.publicUrl
+
+        // 3. Save metadata to Prisma database inside transaction
         const savedFile = await prisma.$transaction(async (tx) => {
             await tx.$executeRawUnsafe(`SET LOCAL ROLE authenticated; SET LOCAL app.current_user_id = '${userId}';`);
             return await tx.file.create({
                 data: {
                     id: fileId,
                     originalName: req.file.originalname,
-                    storedName: req.file.filename,
+                    storedName: storedName,
                     url: fileUrl,
                     userId: userId
                 }
@@ -45,12 +62,12 @@ const uploadFiles = async (req, res) => {
         });
 
         res.status(201).json({
-            message: "File uploaded and metadata saved successfully",
+            message: "File uploaded to Supabase successfully",
             file: savedFile
         })
     } catch (error) {
-        console.error("Error saving file metadata:", error)
-        res.status(500).json({ error: "Failed to save file metadata" })
+        console.error("Upload error:", error)
+        res.status(500).json({ error: "Failed to upload file to storage" })
     }
 }
 const downloadFiles = async (req, res) => {
@@ -58,7 +75,7 @@ const downloadFiles = async (req, res) => {
         const { id } = req.params
         const userId = req.user.id;
 
-        // Find file record in database inside transaction to enforce RLS
+        // 1. Find record using Prisma RLS transaction
         const fileRecord = await prisma.$transaction(async (tx) => {
             await tx.$executeRawUnsafe(`SET LOCAL ROLE authenticated; SET LOCAL app.current_user_id = '${userId}';`);
             return await tx.file.findUnique({
@@ -66,31 +83,21 @@ const downloadFiles = async (req, res) => {
             });
         });
 
-        // Check if database record exists
         if (!fileRecord) {
-            return res.status(404).json({ error: "File record not found in database or access denied" })
+            return res.status(404).json({ error: "File record not found or access denied" })
         }
 
-        // Construct absolute path to the file inside uploads folder
-        const filePath = path.join(__dirname, "..", "..", "uploads", fileRecord.storedName)
+        // 2. Generate a signed temporary download URL from Supabase
+        const { data, error } = await supabase.storage
+            .from("o3-files")
+            .createSignedUrl(`${userId}/${fileRecord.storedName}`, 60) // valid for 60 seconds
+        if (error || !data) throw error
 
-        // Verify file exists on disk
-        if (!fs.existsSync(filePath)) {
-            return res.status(404).json({ error: "Physical file not found on disk" })
-        }
-
-        // Send download response with original name
-        res.download(filePath, fileRecord.originalName, (err) => {
-            if (err) {
-                console.error("Error sending file download:", err)
-                if (!res.headersSent) {
-                    res.status(500).json({ error: "Failed to download file" })
-                }
-            }
-        })
+        // Redirect the user to download the file directly from Supabase Cloud
+        res.redirect(data.signedUrl)
     } catch (error) {
-        console.error("Error downloading file:", error)
-        res.status(500).json({ error: "Server error occurred during download" })
+        console.error("Download error:", error)
+        res.status(500).json({ error: "Failed to download file" })
     }
 }
 const deleteFiles = async (req, res) => {
@@ -98,7 +105,7 @@ const deleteFiles = async (req, res) => {
         const { id } = req.params
         const userId = req.user.id;
 
-        // Find and delete the database record inside an RLS-scoped transaction
+        // 1. Delete database record under RLS transaction
         const fileRecord = await prisma.$transaction(async (tx) => {
             await tx.$executeRawUnsafe(`SET LOCAL ROLE authenticated; SET LOCAL app.current_user_id = '${userId}';`);
             
@@ -113,31 +120,22 @@ const deleteFiles = async (req, res) => {
             return record;
         });
 
-        // Check if database record exists and was deleted
         if (!fileRecord) {
-            return res.status(404).json({ error: "File record not found in database or access denied" })
+            return res.status(404).json({ error: "File record not found or access denied" })
         }
 
-        // Construct absolute path to the physical file
-        const filePath = path.join(__dirname, "..", "..", "uploads", fileRecord.storedName)
-
-        // Delete the physical file from disk (if it exists)
-        try {
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath)
-            } else {
-                console.warn(`Physical file not found on disk at: ${filePath}, skipping physical delete.`)
-            }
-        } catch (fileErr) {
-            console.error("Error deleting physical file from disk:", fileErr)
-        }
+        // 2. Delete the file from Supabase Storage
+        const { error } = await supabase.storage
+            .from("o3-files")
+            .remove([`${userId}/${fileRecord.storedName}`])
+        if (error) console.error("Could not delete from cloud storage:", error)
 
         res.json({
-            message: "File and metadata deleted successfully"
+            message: "File deleted successfully"
         })
     } catch (error) {
-        console.error("Error deleting file:", error)
-        res.status(500).json({ error: "Server error occurred during deletion" })
+        console.error("Delete error:", error)
+        res.status(500).json({ error: "Failed to delete file" })
     }
 }
 

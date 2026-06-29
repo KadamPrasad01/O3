@@ -6,20 +6,8 @@ const {PrismaClient} = require("@prisma/client")
 const router = express.Router()
 
 //cb - callback function 
-const storage = multer.diskStorage({
-    destination : (req,file,cb) =>{
-        cb(null, "uploads/")
-    },
-
-    // extname - extension name
-    filename : (req , file , cb) =>{
-        const extension = path.extname(file.originalname)
-        cb(null , uuid4() + extension)
-    }
-})
-const upload = multer({
-    storage
-})
+const storage = multer.memoryStorage(); // Now stores files temporarily in RAM buffer
+const upload = multer({ storage });
 
 const authenticate = require("../middleware/auth")
 const {getFiles,uploadFiles , downloadFiles , deleteFiles} = require("../controllers/file.controller")

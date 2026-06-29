@@ -84,8 +84,8 @@ Make sure you have [Node.js](https://nodejs.org/) installed (v18 or higher recom
 
 3. Create/verify the `.env` file inside the `backend` directory. It should look like this:
    ```env
-   DATABASE_URL="postgresql://postgres:Prasad%40O3%401015@db.biclucbqocplukflzxsm.supabase.co:5432/postgres"
-   JWT_SECRET="ad17bc93fcd3a82ee20fb9f82d1c67d3e5898d28a385fef109b30c1f6b1509a2b8"
+   DATABASE_URL="DATABASE_URL"
+   JWT_SECRET="JWT SECRET"
    ```
 
 4. Push the Prisma database schema models to PostgreSQL:
